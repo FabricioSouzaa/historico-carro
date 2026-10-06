@@ -2,12 +2,12 @@ import { useState, type FormEvent } from 'react'
 import { loginErrorMessage } from '../lib/authErrors'
 import { supabase } from '../supabase'
 
-export function Login() {
+export function Login({ notice = null }: { notice?: string | null }) {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState('')
+  const [message, setMessage] = useState(notice ?? '')
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
