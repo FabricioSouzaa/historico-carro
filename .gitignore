@@ -26,3 +26,6 @@ dist-ssr
 # Variáveis de ambiente (Supabase)
 .env
 .env.local
+
+# Fotos pessoais do carro (têm placa): sobem pelo app, para o armazenamento privado, nunca pelo git
+car-photos/
