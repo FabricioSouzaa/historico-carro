@@ -24,6 +24,7 @@ export function Carousel({ photos, initialIndex = 0, onIndexChange, onImageError
 
   // girar o celular ou redimensionar a janela muda a largura: mantém a foto atual alinhada
   const indexRef = useRef(index)
+  const settleUntil = useRef(0)
   useLayoutEffect(() => {
     indexRef.current = index
   }, [index])
@@ -34,6 +35,8 @@ export function Carousel({ photos, initialIndex = 0, onIndexChange, onImageError
     const observer = new ResizeObserver(() => {
       if (el.clientWidth === width) return
       width = el.clientWidth
+      // a mudança de largura faz o navegador disparar rolagens que não são do usuário: ignora por um instante
+      settleUntil.current = performance.now() + 250
       el.scrollTo({ left: indexRef.current * width, behavior: 'instant' })
     })
     observer.observe(el)
@@ -42,7 +45,7 @@ export function Carousel({ photos, initialIndex = 0, onIndexChange, onImageError
 
   function handleScroll() {
     const el = track.current
-    if (!el) return
+    if (!el || performance.now() < settleUntil.current) return // reflexo de uma rotação, não de um gesto
     const next = slideIndex(el.scrollLeft, el.clientWidth, photos.length)
     if (next !== index) {
       setIndex(next)

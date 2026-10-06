@@ -1,35 +1,57 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { Carousel } from '../components/Carousel'
 import { clampIndex } from '../lib/carousel'
+import { sameNames } from '../lib/gallery'
 import { newId } from '../lib/id'
 import { compressImage } from '../lib/image'
 import { addGalleryPhoto, deleteGalleryPhoto, listGallery, MAX_GALLERY_PHOTOS, type GalleryPhoto } from '../storage/gallery'
 
 const URL_REFRESH_MS = 45 * 60 * 1000 // os endereços das fotos valem 1 hora
-const ERROR_RELOAD_COOLDOWN_MS = 5 * 60 * 1000
+const ERROR_REFRESH_GAP_MS = 5 * 60 * 1000 // intervalo mínimo entre tentativas disparadas por imagem quebrada
 
 export function Galeria({ onBack }: { onBack: () => void }) {
   const [photos, setPhotos] = useState<GalleryPhoto[] | null>(null)
   const [loadFailed, setLoadFailed] = useState(false)
+  const [retrying, setRetrying] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [current, setCurrent] = useState(0)
   const [startAt, setStartAt] = useState(0)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // Regra que evita corridas: só a resposta MAIS RECENTE vale. Cada carga visível e cada alteração
+  // (enviar, remover) incrementa `gen`; uma resposta que chega com geração antiga é descartada.
+  const gen = useRef(0)
+  const mounted = useRef(true)
+  const photosRef = useRef<GalleryPhoto[] | null>(null)
   const currentRef = useRef(0)
   const loadedAt = useRef(0)
+  const lastAttempt = useRef(0)
+  const refreshing = useRef(false)
+
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
+  useEffect(() => {
+    photosRef.current = photos
+  }, [photos])
 
   const showIndex = useCallback((i: number) => {
     currentRef.current = i
     setCurrent(i)
   }, [])
 
-  /** Recarrega a lista e abre na foto `focus`. Em modo silencioso, uma falha não troca o que já está na tela. */
-  const load = useCallback(
-    async (focus: number, silent = false): Promise<boolean> => {
+  /** Carga que a pessoa vê: troca a lista e abre na foto `focus`. Devolve false só se realmente falhou. */
+  const loadVisible = useCallback(
+    async (focus: number): Promise<boolean> => {
+      const mine = ++gen.current
       try {
         const list = await listGallery()
-        loadedAt.current = Date.now()
+        if (!mounted.current || mine !== gen.current) return true // substituída por algo mais novo
+        loadedAt.current = lastAttempt.current = Date.now()
         const i = clampIndex(focus, list.length)
         setPhotos(list)
         setStartAt(i)
@@ -37,7 +59,8 @@ export function Galeria({ onBack }: { onBack: () => void }) {
         setLoadFailed(false)
         return true
       } catch {
-        if (!silent) setLoadFailed(true)
+        if (!mounted.current || mine !== gen.current) return true
+        setLoadFailed(true)
         setPhotos((prev) => prev ?? [])
         return false
       }
@@ -45,45 +68,75 @@ export function Galeria({ onBack }: { onBack: () => void }) {
     [showIndex],
   )
 
+  /** Renova os endereços temporários em segundo plano, sem mexer na posição nem criar rajadas de pedidos. */
+  const refreshSilently = useCallback(
+    async (minGapMs: number) => {
+      if (refreshing.current || Date.now() - lastAttempt.current < minGapMs) return
+      refreshing.current = true
+      lastAttempt.current = Date.now()
+      const mine = gen.current // não incrementa: uma carga visível ou alteração mais nova invalida esta
+      try {
+        const list = await listGallery()
+        if (!mounted.current || mine !== gen.current) return
+        loadedAt.current = Date.now()
+        const same = sameNames(photosRef.current, list)
+        setPhotos(list)
+        if (!same) {
+          // a lista mudou por outro lado: mantém a foto que está à vista, se ainda existir
+          const i = clampIndex(currentRef.current, list.length)
+          setStartAt(i)
+          showIndex(i)
+        }
+      } catch {
+        // segue com a lista atual; tenta de novo no próximo gatilho
+      } finally {
+        refreshing.current = false
+      }
+    },
+    [showIndex],
+  )
+
   useEffect(() => {
-    let alive = true
+    const mine = ++gen.current
     listGallery()
       .then((list) => {
-        if (!alive) return
-        loadedAt.current = Date.now()
+        if (!mounted.current || mine !== gen.current) return
+        loadedAt.current = lastAttempt.current = Date.now()
         setPhotos(list)
       })
       .catch(() => {
-        if (!alive) return
+        if (!mounted.current || mine !== gen.current) return
         setLoadFailed(true)
         setPhotos([])
       })
-    return () => {
-      alive = false
-    }
   }, [])
 
-  // volta de outra aba/app depois de muito tempo: renova os endereços das fotos antes de expirarem
+  // voltar de outra aba/app depois de muito tempo: renova os endereços antes de eles vencerem
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState === 'visible' && loadedAt.current && Date.now() - loadedAt.current > URL_REFRESH_MS) {
-        void load(currentRef.current, true)
+        void refreshSilently(0)
       }
     }
     document.addEventListener('visibilitychange', onVisible)
     return () => document.removeEventListener('visibilitychange', onVisible)
-  }, [load])
+  }, [refreshSilently])
 
-  // uma imagem que não carrega costuma ser endereço vencido: recarrega a lista (com intervalo mínimo, para não entrar em laço)
-  const handleImageError = useCallback(() => {
-    if (Date.now() - loadedAt.current > ERROR_RELOAD_COOLDOWN_MS) void load(currentRef.current, true)
-  }, [load])
+  const handleImageError = useCallback(() => void refreshSilently(ERROR_REFRESH_GAP_MS), [refreshSilently])
+
+  async function retry() {
+    setRetrying(true)
+    setError('')
+    if (!(await loadVisible(0))) setError('Ainda não foi possível carregar as fotos. Verifique a conexão.')
+    setRetrying(false)
+  }
 
   async function handleFiles(e: ChangeEvent<HTMLInputElement>) {
     const files = [...(e.target.files ?? [])]
     e.target.value = ''
-    if (files.length === 0 || !photos || loadFailed) return
-    const room = MAX_GALLERY_PHOTOS - photos.length
+    const base = photosRef.current
+    if (files.length === 0 || !base || loadFailed || busy) return
+    const room = MAX_GALLERY_PHOTOS - base.length
     if (room <= 0) return setError(`A galeria já tem o máximo de ${MAX_GALLERY_PHOTOS} fotos.`)
     setBusy(true)
     setError('')
@@ -98,15 +151,18 @@ export function Galeria({ onBack }: { onBack: () => void }) {
       }
     }
     if (failed > 0) notes.push(`${failed} ${failed === 1 ? 'foto não pôde ser enviada' : 'fotos não puderam ser enviadas'}.`)
-    // a mensagem é definida depois da recarga, senão ela apagaria os avisos acima
-    if (!(await load(photos.length, true))) notes.push('Não foi possível atualizar a lista; recarregue a página.')
-    setError(notes.join(' '))
-    setBusy(false)
+    // se a lista não atualizar, a tela passa a mostrar "tentar de novo" em vez de uma lista velha
+    if (!(await loadVisible(base.length))) notes.push('As fotos foram enviadas, mas não foi possível atualizar a lista.')
+    if (mounted.current) {
+      setError(notes.join(' '))
+      setBusy(false)
+    }
   }
 
   async function removeCurrent() {
-    const photo = photos?.[current]
-    if (!photos || !photo || !window.confirm('Remover esta foto da galeria? Essa ação não pode ser desfeita.')) return
+    const list = photosRef.current
+    const photo = list?.[currentRef.current]
+    if (!list || !photo || busy || !window.confirm('Remover esta foto da galeria? Essa ação não pode ser desfeita.')) return
     setBusy(true)
     setError('')
     try {
@@ -116,15 +172,18 @@ export function Galeria({ onBack }: { onBack: () => void }) {
       setBusy(false)
       return
     }
-    // some da tela na hora; a recarga confirma com o servidor, mas se falhar a foto já não volta
-    const remaining = photos.filter((p) => p.name !== photo.name)
-    const next = clampIndex(current, remaining.length)
-    setPhotos(remaining)
+    // a remoção invalida qualquer carga que ainda esteja a caminho (ela traria a foto de volta)
+    gen.current++
+    const latest = (photosRef.current ?? list).filter((p) => p.name !== photo.name)
+    const next = clampIndex(list.findIndex((p) => p.name === photo.name), latest.length)
+    setPhotos(latest)
     setStartAt(next)
     showIndex(next)
-    void load(next, true)
     setBusy(false)
+    void refreshSilently(0)
   }
+
+  const ready = photos !== null && !loadFailed
 
   return (
     <div className="space-y-4">
@@ -140,7 +199,9 @@ export function Galeria({ onBack }: { onBack: () => void }) {
       ) : loadFailed ? (
         <div className="card py-10 text-center">
           <p className="mb-3 font-medium">Não foi possível carregar as fotos.</p>
-          <button type="button" className="btn-primary" onClick={() => void load(0)}>Tentar de novo</button>
+          <button type="button" className="btn-primary" onClick={() => void retry()} disabled={retrying}>
+            {retrying ? 'Carregando…' : 'Tentar de novo'}
+          </button>
         </div>
       ) : photos.length === 0 ? (
         <div className="card py-10 text-center">
@@ -156,11 +217,11 @@ export function Galeria({ onBack }: { onBack: () => void }) {
       )}
 
       <div className="flex flex-wrap justify-center gap-2">
-        <button type="button" className="btn-primary" onClick={() => fileRef.current?.click()} disabled={busy || photos === null || loadFailed}>
+        <button type="button" className="btn-primary" onClick={() => fileRef.current?.click()} disabled={busy || !ready}>
           {busy ? 'Enviando…' : '📷 Adicionar fotos'}
         </button>
-        {photos && photos.length > 0 && !loadFailed && (
-          <button type="button" className="btn-danger" onClick={removeCurrent} disabled={busy}>Remover esta foto</button>
+        {ready && photos.length > 0 && (
+          <button type="button" className="btn-danger" onClick={() => void removeCurrent()} disabled={busy}>Remover esta foto</button>
         )}
         <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={handleFiles} />
       </div>
