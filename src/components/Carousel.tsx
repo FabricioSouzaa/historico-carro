@@ -6,10 +6,11 @@ interface Props {
   photos: GalleryPhoto[]
   initialIndex?: number
   onIndexChange?: (index: number) => void
+  onImageError?: () => void
 }
 
 /** Carrossel com rolagem por toque (scroll-snap), setas, bolinhas e teclado. Sem bibliotecas. */
-export function Carousel({ photos, initialIndex = 0, onIndexChange }: Props) {
+export function Carousel({ photos, initialIndex = 0, onIndexChange, onImageError }: Props) {
   const track = useRef<HTMLDivElement>(null)
   const [index, setIndex] = useState(clampIndex(initialIndex, photos.length))
 
@@ -19,6 +20,24 @@ export function Carousel({ photos, initialIndex = 0, onIndexChange }: Props) {
     if (el) el.scrollTo({ left: clampIndex(initialIndex, photos.length) * el.clientWidth, behavior: 'instant' })
     // só na montagem
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // girar o celular ou redimensionar a janela muda a largura: mantém a foto atual alinhada
+  const indexRef = useRef(index)
+  useLayoutEffect(() => {
+    indexRef.current = index
+  }, [index])
+  useLayoutEffect(() => {
+    const el = track.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    let width = el.clientWidth
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth === width) return
+      width = el.clientWidth
+      el.scrollTo({ left: indexRef.current * width, behavior: 'instant' })
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
   }, [])
 
   function handleScroll() {
@@ -57,7 +76,7 @@ export function Carousel({ photos, initialIndex = 0, onIndexChange }: Props) {
       >
         {photos.map((p, i) => (
           <div key={p.name} role="group" aria-roledescription="slide" aria-label={`Foto ${i + 1} de ${photos.length}`} className="h-full w-full shrink-0 snap-center">
-            <img src={p.url} alt={`Foto ${i + 1} do carro`} loading={i <= 1 ? 'eager' : 'lazy'} draggable={false} className="h-full w-full object-contain" />
+            <img src={p.url} alt={`Foto ${i + 1} do carro`} loading={i <= 1 ? 'eager' : 'lazy'} draggable={false} onError={onImageError} className="h-full w-full object-contain" />
           </div>
         ))}
       </div>
