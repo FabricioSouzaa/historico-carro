@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { PasswordForm } from '../components/PasswordForm'
 import { isAppData } from '../storage/backup'
 import { loadLegacyData, markLegacyMigrated } from '../storage/legacy'
 import { supabase } from '../supabase'
@@ -12,6 +13,7 @@ export function Ajustes({ api, email }: { api: DataApi; email: string }) {
   const [editName, setEditName] = useState('')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
+  const [changingPassword, setChangingPassword] = useState(false)
   const [legacy, setLegacy] = useState(loadLegacyData)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -141,7 +143,21 @@ export function Ajustes({ api, email }: { api: DataApi; email: string }) {
       <section className="card space-y-3">
         <h2 className="font-semibold">Conta</h2>
         <p className="muted">Conectado como {email}</p>
-        <button type="button" className="btn-outline" onClick={() => supabase.auth.signOut()}>Sair</button>
+        {changingPassword ? (
+          <PasswordForm
+            onSuccess={() => {
+              setChangingPassword(false)
+              setMessage('Senha alterada com sucesso.')
+              window.scrollTo({ top: 0 })
+            }}
+            onCancel={() => setChangingPassword(false)}
+          />
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="btn-outline" onClick={() => setChangingPassword(true)}>Alterar senha</button>
+            <button type="button" className="btn-outline" onClick={() => supabase.auth.signOut()}>Sair</button>
+          </div>
+        )}
       </section>
     </div>
   )

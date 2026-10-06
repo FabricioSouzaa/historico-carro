@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { supabaseConfigured } from './supabase'
+import { startupLink, supabaseConfigured } from './supabase'
+import { ResetPassword } from './pages/ResetPassword'
 import { useSession } from './useSession'
 import { Login } from './pages/Login'
 import { Ajustes } from './pages/Ajustes'
@@ -30,10 +31,11 @@ function MissingConfig() {
 }
 
 export default function App() {
-  const { session, ready } = useSession()
+  const { session, ready, recovering, finishRecovery } = useSession()
   if (!supabaseConfigured) return <MissingConfig />
   if (!ready) return <p className="p-6 text-center muted">Carregando…</p>
-  if (!session) return <Login />
+  if (!session) return <Login notice={startupLink.error} />
+  if (recovering) return <ResetPassword onDone={finishRecovery} />
   return <Main email={session.user.email ?? ''} />
 }
 

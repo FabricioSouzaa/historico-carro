@@ -1,10 +1,11 @@
 import type { Session } from '@supabase/supabase-js'
 import { useEffect, useState } from 'react'
-import { supabase, supabaseConfigured } from './supabase'
+import { startupLink, supabase, supabaseConfigured } from './supabase'
 
 export function useSession() {
   const [session, setSession] = useState<Session | null>(null)
   const [ready, setReady] = useState(!supabaseConfigured)
+  const [recovering, setRecovering] = useState(startupLink.recovery)
 
   useEffect(() => {
     if (!supabaseConfigured) return
@@ -12,9 +13,18 @@ export function useSession() {
       setSession(data.session)
       setReady(true)
     })
-    const { data } = supabase.auth.onAuthStateChange((_event, next) => setSession(next))
+    const { data } = supabase.auth.onAuthStateChange((event, next) => {
+      setSession(next)
+      if (event === 'PASSWORD_RECOVERY') setRecovering(true)
+    })
     return () => data.subscription.unsubscribe()
   }, [])
 
-  return { session, ready }
+  /** Termina o fluxo de recuperação e limpa o código da URL. */
+  const finishRecovery = () => {
+    setRecovering(false)
+    window.history.replaceState(null, '', window.location.pathname)
+  }
+
+  return { session, ready, recovering, finishRecovery }
 }
