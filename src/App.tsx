@@ -4,6 +4,7 @@ import { ResetPassword } from './pages/ResetPassword'
 import { useSession } from './useSession'
 import { Login } from './pages/Login'
 import { Ajustes } from './pages/Ajustes'
+import { Galeria } from './pages/Galeria'
 import { Gastos } from './pages/Gastos'
 import { Planejados } from './pages/Planejados'
 import { VisaoGeral } from './pages/VisaoGeral'
@@ -41,16 +42,36 @@ export default function App() {
 
 function Main({ email }: { email: string }) {
   const api = useData()
-  const [tab, setTab] = useState<TabId>('visao')
+  const [tab, setTab] = useState<TabId | 'galeria'>('visao')
 
   return (
     <div className="min-h-dvh">
+      {/* no celular o nome do app não cabe na barra de baixo: fica numa barra fina no topo */}
+      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 px-4 backdrop-blur md:hidden dark:border-slate-800 dark:bg-slate-900/95">
+        <button
+          type="button"
+          onClick={() => setTab('galeria')}
+          aria-label="Histórico do Carro: abrir fotos do carro"
+          aria-current={tab === 'galeria' ? 'page' : undefined}
+          className={`py-2 font-bold ${tab === 'galeria' ? 'text-blue-600 dark:text-blue-400' : ''}`}
+        >
+          🚗 Histórico do Carro
+        </button>
+      </header>
       <nav
         aria-label="Navegação principal"
         className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur md:sticky md:top-0 md:bottom-auto md:border-t-0 md:border-b dark:border-slate-800 dark:bg-slate-900/95"
       >
         <div className="mx-auto flex max-w-3xl items-center justify-around md:justify-start md:gap-2 md:px-4">
-          <span className="mr-4 hidden font-bold md:block">🚗 Histórico do Carro</span>
+          <button
+            type="button"
+            onClick={() => setTab('galeria')}
+            aria-label="Histórico do Carro: abrir fotos do carro"
+            aria-current={tab === 'galeria' ? 'page' : undefined}
+            className={`mr-4 hidden rounded-lg px-2 py-1 font-bold hover:bg-slate-100 md:block dark:hover:bg-slate-800 ${tab === 'galeria' ? 'text-blue-600 dark:text-blue-400' : ''}`}
+          >
+            🚗 Histórico do Carro
+          </button>
           {TABS.map((t) => (
             <button
               key={t.id}
@@ -74,7 +95,9 @@ function Main({ email }: { email: string }) {
             <button type="button" className="shrink-0 font-medium underline" onClick={api.clearError}>Fechar</button>
           </div>
         )}
-        {api.loading ? (
+        {tab === 'galeria' ? (
+          <Galeria onBack={() => setTab('visao')} />
+        ) : api.loading ? (
           <p className="py-10 text-center muted">Carregando seus dados…</p>
         ) : (
           <>
