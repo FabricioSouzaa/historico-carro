@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { loginErrorMessage } from '../lib/authErrors'
 import { supabase } from '../supabase'
 
 export function Login() {
@@ -16,14 +17,14 @@ export function Login() {
     try {
       if (mode === 'signin') {
         const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
-        if (error) setMessage('E-mail ou senha incorretos.')
+        if (error) setMessage(loginErrorMessage(error))
       } else {
         const { data, error } = await supabase.auth.signUp({ email: email.trim(), password })
         if (error) setMessage(error.message.includes('already') ? 'Esse e-mail já tem conta. Use "Entrar".' : 'Não foi possível criar a conta.')
         else if (!data.session) setMessage('Conta criada. Confirme o e-mail que enviamos e depois entre.')
       }
     } catch {
-      setMessage('Sem conexão. Tente novamente.')
+      setMessage('Não foi possível falar com o servidor. Verifique a conexão e tente novamente.')
     } finally {
       setBusy(false)
     }
