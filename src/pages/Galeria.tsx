@@ -28,6 +28,7 @@ export function Galeria({ onBack }: { onBack: () => void }) {
   const loadedAt = useRef(0)
   const lastAttempt = useRef(0)
   const refreshing = useRef(false)
+  const refreshId = useRef(0)
 
   useEffect(() => {
     mounted.current = true
@@ -68,19 +69,28 @@ export function Galeria({ onBack }: { onBack: () => void }) {
     [showIndex],
   )
 
-  /** Renova os endereços temporários em segundo plano, sem mexer na posição nem criar rajadas de pedidos. */
+  /**
+   * Renova os endereços temporários em segundo plano, sem mexer na posição nem criar rajadas de pedidos.
+   * `force` substitui uma renovação já em andamento (usado depois de remover, quando a anterior foi invalidada).
+   */
   const refreshSilently = useCallback(
-    async (minGapMs: number) => {
-      if (refreshing.current || Date.now() - lastAttempt.current < minGapMs) return
+    async (minGapMs: number, force = false) => {
+      if ((refreshing.current && !force) || Date.now() - lastAttempt.current < minGapMs) return
+      const id = ++refreshId.current
       refreshing.current = true
       lastAttempt.current = Date.now()
       const mine = gen.current // não incrementa: uma carga visível ou alteração mais nova invalida esta
       try {
         const list = await listGallery()
-        if (!mounted.current || mine !== gen.current) return
+        if (!mounted.current) return
+        if (mine !== gen.current) {
+          lastAttempt.current = 0 // resposta descartada não conta como tentativa: outra renovação pode acontecer
+          return
+        }
         loadedAt.current = Date.now()
         const same = sameNames(photosRef.current, list)
         setPhotos(list)
+        setLoadFailed(false) // a lista veio do servidor, então o estado "não carregou" acabou
         if (!same) {
           // a lista mudou por outro lado: mantém a foto que está à vista, se ainda existir
           const i = clampIndex(currentRef.current, list.length)
@@ -90,7 +100,7 @@ export function Galeria({ onBack }: { onBack: () => void }) {
       } catch {
         // segue com a lista atual; tenta de novo no próximo gatilho
       } finally {
-        refreshing.current = false
+        if (id === refreshId.current) refreshing.current = false
       }
     },
     [showIndex],
@@ -142,6 +152,7 @@ export function Galeria({ onBack }: { onBack: () => void }) {
     setError('')
     const notes: string[] = []
     if (files.length > room) notes.push(`Só ${room === 1 ? 'coube 1' : `couberam ${room}`}: o limite é de ${MAX_GALLERY_PHOTOS} fotos.`)
+    const attempted = Math.min(files.length, room)
     let failed = 0
     for (const file of files.slice(0, room)) {
       try {
@@ -152,7 +163,9 @@ export function Galeria({ onBack }: { onBack: () => void }) {
     }
     if (failed > 0) notes.push(`${failed} ${failed === 1 ? 'foto não pôde ser enviada' : 'fotos não puderam ser enviadas'}.`)
     // se a lista não atualizar, a tela passa a mostrar "tentar de novo" em vez de uma lista velha
-    if (!(await loadVisible(base.length))) notes.push('As fotos foram enviadas, mas não foi possível atualizar a lista.')
+    if (!(await loadVisible(base.length))) {
+      notes.push(attempted > failed ? 'As fotos foram enviadas, mas não foi possível atualizar a lista.' : 'Não foi possível atualizar a lista.')
+    }
     if (mounted.current) {
       setError(notes.join(' '))
       setBusy(false)
@@ -180,7 +193,7 @@ export function Galeria({ onBack }: { onBack: () => void }) {
     setStartAt(next)
     showIndex(next)
     setBusy(false)
-    void refreshSilently(0)
+    void refreshSilently(0, true)
   }
 
   const ready = photos !== null && !loadFailed

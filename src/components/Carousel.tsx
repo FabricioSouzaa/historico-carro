@@ -25,6 +25,7 @@ export function Carousel({ photos, initialIndex = 0, onIndexChange, onImageError
   // girar o celular ou redimensionar a janela muda a largura: mantém a foto atual alinhada
   const indexRef = useRef(index)
   const settleUntil = useRef(0)
+  const settleTimer = useRef(0)
   useLayoutEffect(() => {
     indexRef.current = index
   }, [index])
@@ -38,19 +39,34 @@ export function Carousel({ photos, initialIndex = 0, onIndexChange, onImageError
       // a mudança de largura faz o navegador disparar rolagens que não são do usuário: ignora por um instante
       settleUntil.current = performance.now() + 250
       el.scrollTo({ left: indexRef.current * width, behavior: 'instant' })
+      // se um gesto terminou dentro da janela, o último scroll foi ignorado: relê a posição quando ela acaba
+      window.clearTimeout(settleTimer.current)
+      settleTimer.current = window.setTimeout(() => syncRef.current(), 260)
     })
     observer.observe(el)
-    return () => observer.disconnect()
+    return () => {
+      observer.disconnect()
+      window.clearTimeout(settleTimer.current)
+    }
   }, [])
 
-  function handleScroll() {
+  function syncIndex() {
     const el = track.current
-    if (!el || performance.now() < settleUntil.current) return // reflexo de uma rotação, não de um gesto
+    if (!el) return
     const next = slideIndex(el.scrollLeft, el.clientWidth, photos.length)
     if (next !== index) {
       setIndex(next)
       onIndexChange?.(next)
     }
+  }
+  const syncRef = useRef(syncIndex)
+  useLayoutEffect(() => {
+    syncRef.current = syncIndex
+  })
+
+  function handleScroll() {
+    if (performance.now() < settleUntil.current) return // reflexo de uma rotação, não de um gesto
+    syncIndex()
   }
 
   function goTo(i: number) {
